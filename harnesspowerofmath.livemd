@@ -1,0 +1,132 @@
+# HarnessPowerOfMath
+
+```elixir
+Mix.install([
+  {:nx, "~> 0.7.2"},
+  {:exla, "~> 0.7.2"},
+  {:kino, "~> 0.12.3"},
+  {:stb_image, "~> 0.6.8"},
+  {:vega_lite, "~> 0.1.9"},
+  {:kino_vega_lite, "~> 0.1.11"}
+])
+```
+
+## Section
+
+```elixir
+Nx.default_backend(EXLA.Backend)
+```
+
+```elixir
+a = Nx.tensor([1, 2, 3])
+b = Nx.tensor([4.0, 5.0, 6.0])
+c = Nx.tensor([1, 0, 1], type: {:u, 8})
+```
+
+```elixir
+sales_day_1 = Nx.tensor([32, 10, 14])
+sales_day_2 = Nx.tensor([10, 24, 21])
+
+total_sales = Nx.add(sales_day_1, sales_day_2)
+```
+
+```elixir
+keep_rate = 0.9
+unreturned_sales = Nx.multiply(keep_rate, total_sales)
+```
+
+```elixir
+sales_matrix =
+  Nx.tensor([
+    [32, 10, 14],
+    [10, 24, 21]
+  ])
+
+Nx.transpose(sales_matrix)
+```
+
+```elixir
+vector = Nx.tensor([1, 2, 3])
+Nx.transpose(vector)
+```
+
+```elixir
+invert_color_channels =
+  Nx.tensor([
+    [-1, 0, 0],
+    [0, -1, 0],
+    [0, 0, -1]
+  ])
+
+Path.expand("~/Development/elixir/machine_in_elixir/images")
+|> Path.join("Cat.jpg")
+|> StbImage.read_file!()
+|> StbImage.resize(256, 256)
+|> StbImage.to_nx()
+|> Nx.dot(invert_color_channels)
+|> Nx.as_type({:u, 8})
+|> Kino.Image.new()
+```
+
+```elixir
+simulation = fn key ->
+  {value, key} = Nx.Random.uniform(key)
+  if Nx.to_number(value) < 0.5, do: {0, key}, else: {1, key}
+end
+
+key = Nx.Random.key(42)
+
+for n <- [10, 100, 1000, 10000] do
+  Enum.map_reduce(1..n, key, fn _, key -> simulation.(key) end)
+  |> elem(0)
+  |> Enum.sum()
+  |> IO.inspect()
+end
+```
+
+```elixir
+defmodule BerryFarm do
+  import Nx.Defn
+
+  defn profits(trees) do
+    trees
+    |> Nx.subtract(1)
+    |> Nx.pow(4)
+    |> Nx.negate()
+    |> Nx.add(Nx.pow(trees, 3))
+    |> Nx.add(Nx.pow(trees, 2))
+  end
+
+  defn profits_derivatives(trees) do
+    grad(trees, &profits/1)
+  end
+end
+
+trees = Nx.linspace(0, 4, n: 100)
+profits = BerryFarm.profits(trees)
+profits_derivatives = BerryFarm.profits_derivatives(trees)
+```
+
+```elixir
+alias VegaLite, as: Vl
+
+title = "Berry Profits and Profits Rate of Change"
+
+Vl.new(title: title, width: 500, height: 500)
+|> Vl.data_from_values(%{
+  trees: Nx.to_flat_list(trees),
+  profits: Nx.to_flat_list(profits),
+  profits_derivatives: Nx.to_flat_list(profits_derivatives)
+})
+|> Vl.layers([
+  Vl.new()
+  |> Vl.mark(:line, interpolate: :basis)
+  |> Vl.encode_field(:x, "trees", type: :quantitative)
+  |> Vl.encode_field(:y, "profits", type: :quantitative),
+  Vl.new()
+  |> Vl.mark(:line, interpolate: :basis)
+  |> Vl.encode_field(:x, "trees", type: :quantitative)
+  |> Vl.encode_field(:y, "profits_derivatives", type: :quantitative)
+  |> Vl.encode(:color, value: "#ff0000")
+])
+```
