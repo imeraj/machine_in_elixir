@@ -1,0 +1,117 @@
+# LearnToSee
+
+```elixir
+Mix.install([
+  {:axon, "~> 0.6.1"},
+  {:nx, "~> 0.7.2"},
+  {:exla, "~> 0.7.2"},
+  {:stb_image, "~> 0.6.8"},
+  {:kino, "~> 0.12.3"}
+])
+```
+
+## Section
+
+```elixir
+Nx.global_default_backend(EXLA.Backend)
+```
+
+```elixir
+defmodule CatsAndDogs do
+  def pipeline(paths, batch_size, target_height, target_width) do
+    paths
+    |> Enum.shuffle()
+    |> Task.async_stream(&parse_image/1)
+    |> Stream.filter(fn
+      {:ok, {%StbImage{}, _}} -> true
+      _ -> false
+    end)
+    |> Stream.map(&to_tensors(&1, target_height, target_width))
+    |> Stream.filter(fn
+      {img_tensor, _} ->
+        case Nx.shape(img_tensor) do
+          {_, _, 3} -> true
+          _ -> false
+        end
+    end)
+    |> Stream.chunk_every(batch_size, batch_size, :discard)
+    |> Stream.map(fn chunks ->
+      {img_chunk, label_chunk} = Enum.unzip(chunks)
+      {Nx.stack(img_chunk), Nx.stack(label_chunk)}
+    end)
+  end
+
+  defp parse_image(path) do
+    label = if String.contains?(path, "Cat"), do: 0, else: 1
+
+    case StbImage.read_file(path) do
+      {:ok, img} -> {img, label}
+      _error -> :error
+    end
+  end
+
+  defp to_tensors({:ok, {img, label}}, target_height, target_width) do
+    img_tensor =
+      img
+      |> StbImage.resize(target_height, target_width)
+      |> StbImage.to_nx()
+      |> Nx.divide(255)
+
+    label_tensor = Nx.tensor([label])
+
+    {img_tensor, label_tensor}
+  end
+end
+```
+
+```elixir
+batch_size = 128
+target_height = 96
+target_width = 96
+
+{test_paths, train_paths} =
+  Path.join([Path.expand("~/Development/elixir/machine_in_elixir/images/train/"), "**", "*.jpg"])
+  |> Path.wildcard()
+  |> Enum.shuffle()
+  |> Enum.split(1000)
+```
+
+```elixir
+train_pipeline = CatsAndDogs.pipeline(train_paths, batch_size, target_height, target_width)
+```
+
+```elixir
+Enum.take(train_pipeline, 1)
+```
+
+```elixir
+test_pipeline = CatsAndDogs.pipeline(test_paths, batch_size, target_height, target_width)
+```
+
+```elixir
+Enum.take(test_pipeline, 1)
+```
+
+```elixir
+mlp_model =
+  Axon.input("images", shape: {nil, target_height, target_width, 3})
+  |> Axon.flatten()
+  |> Axon.dense(256, activation: :relu)
+  |> Axon.dense(128, activation: :relu)
+  |> Axon.dense(1, activation: :sigmoid)
+```
+
+```elixir
+mlp_trained_model_state =
+  mlp_model
+  |> Axon.Loop.trainer(:binary_cross_entropy, :adam)
+  |> Axon.Loop.metric(:accuracy)
+  |> Axon.Loop.run(train_pipeline, %{}, epochs: 5, compiler: EXLA)
+```
+
+```elixir
+mlp_model
+|> Axon.Loop.evaluator()
+|> Axon.Loop.metric(:accuracy)
+|> Axon.Loop.run(test_pipeline, mlp_trained_model_state, compiler: EXLA)
+```
